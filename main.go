@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -15,9 +14,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"bufio"
 
 	"flag"
 	
+	"github.com/fatih/color"
+	"repo-concat/cli"
 	"repo-concat/tui"
 )
 
@@ -78,13 +80,17 @@ func main() {
 	}
 
 	if config.githubURL == "" && config.localPath == "" {
-		fmt.Println("Error: Either GitHub URL or local directory path is required")
+		fmt.Println(cli.ErrorMsg("Configuration Error", 
+			"Either GitHub URL or local directory path is required",
+			"Use -url for GitHub repositories or -path for local directories"))
 		flag.Usage()
 		os.Exit(1)
 	}
 
 	if config.githubURL != "" && config.localPath != "" {
-		fmt.Println("Error: Cannot specify both GitHub URL and local directory path")
+		fmt.Println(cli.ErrorMsg("Configuration Error", 
+			"Cannot specify both GitHub URL and local directory path",
+			"Use either -url OR -path, not both"))
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -212,16 +218,16 @@ func processRepository(config Config) error {
 		if _, err := os.Stat(config.localPath); os.IsNotExist(err) {
 			return fmt.Errorf("local directory does not exist: %s", config.localPath)
 		}
-		fmt.Printf("Processing local directory: %s\n", config.localPath)
+		fmt.Println(cli.StatusMsg("info", "Processing local directory: "+config.localPath))
 		repoPath = config.localPath
 		shouldCleanup = false
 	} else {
 		// Handle GitHub URL - check tmp cache first
 		if cachedPath, found, cachedAt, err := getCachedRepo(config.githubURL); err != nil {
-			fmt.Printf("Warning: cache check failed: %v\n", err)
+			fmt.Println(cli.StatusMsg("warning", fmt.Sprintf("Cache check failed: %v", err)))
 		} else if found {
 			age := time.Since(cachedAt)
-			fmt.Printf("Using cached repository (cached %s ago): %s\n", formatDuration(age), config.githubURL)
+			fmt.Println(cli.StatusMsg("success", fmt.Sprintf("Using cached repository (cached %s ago)", formatDuration(age))))
 			repoPath = cachedPath
 			shouldCleanup = false
 		}
@@ -233,11 +239,14 @@ func processRepository(config Config) error {
 				return fmt.Errorf("failed to create temp directory: %w", err)
 			}
 
-			fmt.Printf("Cloning repository: %s\n", config.githubURL)
+			fmt.Println(cli.StatusMsg("loading", "Cloning repository: "+config.githubURL))
+			
 			if err := cloneRepository(config.githubURL, tempDir); err != nil {
 				os.RemoveAll(tempDir)
 				return fmt.Errorf("failed to clone repository: %w", err)
 			}
+			
+			fmt.Println(cli.StatusMsg("success", "Repository cloned successfully"))
 
 			repoName := extractRepoName(config.githubURL)
 			repoPath = filepath.Join(tempDir, repoName)
@@ -252,7 +261,7 @@ func processRepository(config Config) error {
 						repoPath = cachedRepoPath
 						shouldCleanup = false
 						if err := cacheRepo(config.githubURL, cachedRepoPath); err != nil {
-							fmt.Printf("Warning: failed to cache repository metadata: %v\n", err)
+							color.Yellow("⚠️  Warning: failed to cache repository metadata: %v", err)
 						}
 					}
 				}
@@ -265,61 +274,63 @@ func processRepository(config Config) error {
 	}
 
 	if config.peek {
+		fmt.Println()
+		fmt.Println(cli.SimpleHeader("📋 Repository Preview"))
+		fmt.Println()
+		
 		dryRunFiles, excludedFiles, err := performDryRun(repoPath, config.exclusions, config.inclusions)
 		if err != nil {
 			return fmt.Errorf("failed to perform dry run: %w", err)
 		}
 
-		if len(config.inclusions) > 0 || len(config.exclusions) > 0 {
-			fmt.Println("\nFiltered repository structure (only showing relevant directories):")
-			if err := showFilteredDirectoryStructure(repoPath, dryRunFiles, 0, 3); err != nil {
-				return fmt.Errorf("failed to show filtered directory structure: %w", err)
-			}
-		} else {
-			fmt.Println("\nRepository structure:")
-			if err := showDirectoryStructure(repoPath, 0, 3); err != nil {
-				return fmt.Errorf("failed to show directory structure: %w", err)
+		// Convert file paths to relative paths for cleaner display
+		var relativeFiles []string
+		for _, file := range dryRunFiles {
+			if rel, err := filepath.Rel(repoPath, file); err == nil {
+				relativeFiles = append(relativeFiles, rel)
+			} else {
+				relativeFiles = append(relativeFiles, file)
 			}
 		}
+		
+		// Show simple tree with meaningful name
+		displayName := filepath.Base(repoPath)
+		if config.localPath != "" {
+			displayName = config.localPath
+		} else if config.githubURL != "" {
+			displayName = extractRepoName(config.githubURL)
+		}
+		fmt.Println(cli.SimpleTree(displayName, relativeFiles, nil))
+		fmt.Println()
 
-		fmt.Println("\nDry run - Files that would be processed:")
-
-		if len(dryRunFiles) > 0 {
-			fmt.Printf("\n✅ Files to be included (%d):\n", len(dryRunFiles))
-			for _, file := range dryRunFiles {
-				relativePath, _ := filepath.Rel(repoPath, file)
-				fmt.Printf("  📄 %s\n", relativePath)
-			}
-		} else {
-			fmt.Println("\n❌ No files would be included with current filters")
+		// Simple summary
+		fmt.Println(cli.SimpleSummary(int64(len(dryRunFiles)), int64(len(excludedFiles)), 0))
+		fmt.Println()
+		
+		if len(dryRunFiles) == 0 {
+			fmt.Println(cli.StatusMsg("error", "No files would be included with current filters"))
+			return nil
 		}
 
-		if len(excludedFiles) > 0 && len(excludedFiles) <= 20 {
-			fmt.Printf("\n❌ Files excluded (%d):\n", len(excludedFiles))
-			for _, file := range excludedFiles {
-				relativePath, _ := filepath.Rel(repoPath, file)
-				fmt.Printf("  🚫 %s\n", relativePath)
-			}
-		} else if len(excludedFiles) > 20 {
-			fmt.Printf("\n❌ Files excluded: %d (too many to display)\n", len(excludedFiles))
-		}
-
-		fmt.Printf("\nSummary: %d files to include, %d files excluded\n", len(dryRunFiles), len(excludedFiles))
-
-		fmt.Print("\nProceed with concatenation? (y/N): ")
+		// Simple confirmation
+		fmt.Print(cli.ConfirmPrompt(fmt.Sprintf("Proceed with concatenation of %d files?", len(dryRunFiles)))) 
+		fmt.Print(": ")
+		
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
 		response = strings.TrimSpace(strings.ToLower(response))
 		if response != "y" && response != "yes" {
-			fmt.Println("Operation cancelled")
+			fmt.Println(cli.StatusMsg("warning", "Operation cancelled"))
 			return nil
 		}
 	}
 
+	fmt.Println(cli.StatusMsg("loading", "Collecting files..."))
 	files, err := collectFiles(repoPath, config.exclusions, config.inclusions)
 	if err != nil {
 		return fmt.Errorf("failed to collect files: %w", err)
 	}
+	fmt.Println(cli.StatusMsg("success", fmt.Sprintf("Found %d files to process", len(files))))
 
 	var outputFileName string
 	if config.localPath != "" {
@@ -336,6 +347,7 @@ func processRepository(config Config) error {
 	
 	outputPath := filepath.Join(outputSubDir, outputFileName)
 
+	fmt.Println(cli.StatusMsg("loading", "Concatenating files..."))
 	content, err := concatenateFiles(files, repoPath)
 	if err != nil {
 		return fmt.Errorf("failed to concatenate files: %w", err)
@@ -345,23 +357,19 @@ func processRepository(config Config) error {
 		return fmt.Errorf("failed to write output file: %w", err)
 	}
 
+	var tokenCount int
 	if config.tokenEst {
-		tokenCount := estimateTokens(content)
-		fmt.Printf("Estimated tokens: %d\n", tokenCount)
+		tokenCount = estimateTokens(content)
 	}
-
-	fmt.Printf("Files concatenated to: %s\n", outputPath)
-	fmt.Printf("Total files processed: %d\n", len(files))
+	
+	fmt.Println()
+	fmt.Println(cli.Done(outputPath, len(files), tokenCount))
 
 	if err := copyToClipboard(content); err != nil {
-		fmt.Printf("Warning: failed to copy to clipboard: %v\n", err)
-		fmt.Println("To enable clipboard copying, install one of these utilities:")
-		fmt.Println("  Ubuntu/Debian: sudo apt install xclip")
-		fmt.Println("  Arch/Manjaro:  sudo pacman -S xclip")
-		fmt.Println("  Fedora/RHEL:   sudo dnf install xclip")
-		fmt.Println("  Or manually copy the content from: " + outputPath)
+		fmt.Println(cli.StatusMsg("warning", "Could not copy to clipboard"))
+		fmt.Println(cli.Subtle("  Install xclip (Linux) or use the output file above"))
 	} else {
-		fmt.Println("Content copied to clipboard")
+		fmt.Println(cli.StatusMsg("success", "Content copied to clipboard"))
 	}
 
 	return nil
@@ -433,7 +441,7 @@ func showFilteredDirectoryStructureRecursive(path string, relevantDirs map[strin
 		if entry.IsDir() {
 			// Only show directories that contain relevant files
 			if relevantDirs[fullPath] {
-				fmt.Printf("%s📁 %s/\n", indent, entry.Name())
+				color.HiBlue("%s📁 %s/", indent, entry.Name())
 				if depth < maxDepth {
 					showFilteredDirectoryStructureRecursive(fullPath, relevantDirs, relevantFiles, depth+1, maxDepth, rootPath)
 				}
@@ -442,7 +450,7 @@ func showFilteredDirectoryStructureRecursive(path string, relevantDirs map[strin
 			// Only show files that are in the relevant files list
 			for _, relevantFile := range relevantFiles {
 				if relevantFile == fullPath {
-					fmt.Printf("%s📄 %s\n", indent, entry.Name())
+					color.HiGreen("%s📄 %s", indent, entry.Name())
 					break
 				}
 			}
@@ -468,12 +476,12 @@ func showDirectoryStructure(path string, depth, maxDepth int) error {
 
 		indent := strings.Repeat("  ", depth)
 		if entry.IsDir() {
-			fmt.Printf("%s📁 %s/\n", indent, entry.Name())
+			color.HiBlue("%s📁 %s/", indent, entry.Name())
 			if depth < maxDepth {
 				showDirectoryStructure(filepath.Join(path, entry.Name()), depth+1, maxDepth)
 			}
 		} else {
-			fmt.Printf("%s📄 %s\n", indent, entry.Name())
+			color.HiGreen("%s📄 %s", indent, entry.Name())
 		}
 	}
 	return nil
@@ -744,6 +752,8 @@ func concatenateFiles(files []string, rootPath string) (string, error) {
 
 	return result.String(), nil
 }
+
+
 
 func generateOutputFileName(githubURL string) string {
 	repoName := extractRepoName(githubURL)
