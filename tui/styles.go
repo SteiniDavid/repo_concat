@@ -5,51 +5,62 @@ import (
 )
 
 var (
-	// Color palette - softer, more readable colors
-	primaryColor   = lipgloss.Color("#60A5FA") // Soft blue
-	secondaryColor = lipgloss.Color("#34D399") // Soft green  
-	successColor   = lipgloss.Color("#22C55E") // Green
-	warningColor   = lipgloss.Color("#FBBF24") // Yellow
-	errorColor     = lipgloss.Color("#F87171") // Soft red
-	textColor      = lipgloss.Color("#E5E7EB") // Light gray
-	mutedColor     = lipgloss.Color("#9CA3AF") // Medium gray
-	bgColor        = lipgloss.Color("#1F2937") // Dark background
+	// Enhanced color palette - vibrant but professional
+	primaryColor   = lipgloss.Color("#3B82F6") // Bright blue
+	secondaryColor = lipgloss.Color("#10B981") // Emerald green  
+	accentColor    = lipgloss.Color("#8B5CF6") // Purple
+	successColor   = lipgloss.Color("#059669") // Dark green
+	warningColor   = lipgloss.Color("#F59E0B") // Amber
+	errorColor     = lipgloss.Color("#EF4444") // Red
+	infoColor      = lipgloss.Color("#06B6D4") // Cyan
+	textColor      = lipgloss.Color("#F9FAFB") // Almost white
+	mutedColor     = lipgloss.Color("#6B7280") // Medium gray
+	bgColor        = lipgloss.Color("#111827") // Dark blue-gray
+	highlightColor = lipgloss.Color("#FBBF24") // Golden yellow
 	
 	// Base styles - clean and minimal
 	BaseStyle = lipgloss.NewStyle().
 		Padding(1, 2)
 	
-	// Header styles - clean and readable
+	// Header styles - enhanced with gradients and borders
 	HeaderStyle = lipgloss.NewStyle().
 		Foreground(primaryColor).
 		Bold(true).
-		Padding(0, 1).
-		MarginBottom(1)
+		Padding(0, 2).
+		MarginBottom(1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(primaryColor)
 	
 	TitleStyle = lipgloss.NewStyle().
-		Foreground(primaryColor).
+		Foreground(textColor).
+		Background(primaryColor).
 		Bold(true).
-		Padding(1, 0).
+		Padding(1, 3).
 		MarginBottom(1).
-		Align(lipgloss.Left)
+		Align(lipgloss.Center).
+		Border(lipgloss.ThickBorder()).
+		BorderForeground(accentColor)
 	
-	// Input styles - subtle and clean
+	// Input styles - enhanced with glow effects
 	InputStyle = lipgloss.NewStyle().
 		BorderForeground(mutedColor).
-		Padding(0, 1).
-		Width(50).
-		Foreground(textColor)
+		Padding(0, 2).
+		Width(48).
+		Foreground(textColor).
+		Border(lipgloss.RoundedBorder())
 	
 	InputFocusedStyle = InputStyle.Copy().
-		BorderForeground(primaryColor).
-		Foreground(textColor)
+		BorderForeground(highlightColor).
+		Foreground(textColor).
+		Bold(true)
 	
 	LabelStyle = lipgloss.NewStyle().
 		Foreground(textColor).
 		Bold(false).
-		Width(12).
+		Width(15).
 		Align(lipgloss.Right).
-		MarginRight(1)
+		MarginRight(2).
+		Padding(1, 0)
 	
 	// List styles - minimal borders
 	ListStyle = lipgloss.NewStyle().
@@ -69,10 +80,15 @@ var (
 	
 	DirectoryStyle = lipgloss.NewStyle().
 		Foreground(secondaryColor).
-		Bold(false)
+		Bold(true).
+		Italic(false)
 	
 	FileStyle = lipgloss.NewStyle().
 		Foreground(textColor)
+	
+	HighlightedFileStyle = lipgloss.NewStyle().
+		Foreground(highlightColor).
+		Bold(true)
 	
 	// Status styles
 	StatusStyle = lipgloss.NewStyle().
@@ -97,16 +113,26 @@ var (
 		Padding(0, 1).
 		MarginBottom(1)
 	
-	// Button styles - simple and clean
+	// Button styles - enhanced with gradients and shadows
 	ButtonStyle = lipgloss.NewStyle().
 		Foreground(textColor).
 		Background(mutedColor).
-		Padding(0, 3).
-		MarginRight(2)
+		Padding(0, 4).
+		MarginRight(2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(mutedColor)
 	
 	ButtonFocusedStyle = ButtonStyle.Copy().
 		Foreground(textColor).
-		Background(primaryColor)
+		Background(primaryColor).
+		BorderForeground(primaryColor).
+		Bold(true)
+	
+	ButtonActiveStyle = ButtonStyle.Copy().
+		Foreground(textColor).
+		Background(successColor).
+		BorderForeground(successColor).
+		Bold(true)
 	
 	// Help styles
 	HelpStyle = lipgloss.NewStyle().
@@ -159,4 +185,35 @@ func RenderLabel(text string) string {
 
 func RenderHelp(text string) string {
 	return HelpStyle.Render(text)
+}
+
+func RenderHighlight(text string) string {
+	return lipgloss.NewStyle().
+		Foreground(highlightColor).
+		Bold(true).
+		Render(text)
+}
+
+func RenderInfo(text string) string {
+	return lipgloss.NewStyle().
+		Foreground(infoColor).
+		Bold(true).
+		Render(text)
+}
+
+func RenderAccent(text string) string {
+	return lipgloss.NewStyle().
+		Foreground(accentColor).
+		Bold(true).
+		Render(text)
+}
+
+func RenderGradientText(text string) string {
+	// Simple gradient effect using different shades
+	return lipgloss.NewStyle().
+		Foreground(primaryColor).
+		Background(lipgloss.Color("#1E3A8A")).
+		Bold(true).
+		Padding(0, 1).
+		Render(text)
 }

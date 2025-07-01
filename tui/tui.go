@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -189,10 +190,13 @@ func (m Model) configViewRender() string {
 
 	b.WriteString("\n")
 	
-	// Buttons
-	b.WriteString(RenderButton("Peek", m.focused == 4))
-	b.WriteString(RenderButton("Browse Files", m.focused == 5))
-	b.WriteString(RenderButton("Process Now", m.focused == 6))
+	// Buttons - render them on the same line
+	buttons := lipgloss.JoinHorizontal(lipgloss.Left,
+		RenderButton("Peek", m.focused == 4),
+		RenderButton("Browse Files", m.focused == 5),
+		RenderButton("Process Now", m.focused == 6),
+	)
+	b.WriteString(buttons)
 	b.WriteString("\n\n")
 
 	b.WriteString(RenderHelp("↑/↓: Navigate • Tab: Next field • Enter: Select • Esc: Exit"))
@@ -322,7 +326,22 @@ func (m Model) resultsViewRender() string {
 
 func RunTUI(config Config) error {
 	m := NewModel(config)
+	
+	// Check if we're in an interactive terminal
+	if !isInteractive() {
+		return fmt.Errorf("TUI mode requires an interactive terminal")
+	}
+	
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
+}
+
+// isInteractive checks if we're running in an interactive terminal
+func isInteractive() bool {
+	// Check if we have a valid TTY
+	if _, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err != nil {
+		return false
+	}
+	return true
 }
