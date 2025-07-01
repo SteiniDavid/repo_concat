@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"flag"
+	
+	"repo-concat/tui"
 )
 
 type Config struct {
@@ -27,6 +29,7 @@ type Config struct {
 	peek         bool
 	outputDir    string
 	tokenEst     bool
+	enableTUI    bool
 }
 
 type CacheEntry struct {
@@ -49,8 +52,30 @@ func main() {
 	flag.BoolVar(&config.peek, "peek", false, "Show folder structure and dry run before processing")
 	flag.StringVar(&config.outputDir, "output", ".", "Output directory for concatenated file")
 	flag.BoolVar(&config.tokenEst, "tokens", true, "Estimate token count")
+	flag.BoolVar(&config.enableTUI, "tui", false, "Enable modern TUI interface")
 
 	flag.Parse()
+
+	config.exclusions = []string(exclusionFlags)
+	config.inclusions = []string(inclusionFlags)
+
+	// Launch TUI mode if requested
+	if config.enableTUI {
+		tuiConfig := tui.Config{
+			URL:       config.githubURL,
+			Path:      config.localPath,
+			Include:   config.inclusions,
+			Exclude:   config.exclusions,
+			Output:    config.outputDir,
+			EnableTUI: true,
+		}
+		
+		if err := tui.RunTUI(tuiConfig); err != nil {
+			fmt.Printf("TUI error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if config.githubURL == "" && config.localPath == "" {
 		fmt.Println("Error: Either GitHub URL or local directory path is required")
@@ -63,9 +88,6 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-
-	config.exclusions = []string(exclusionFlags)
-	config.inclusions = []string(inclusionFlags)
 
 	if err := processRepository(config); err != nil {
 		log.Fatal(err)
