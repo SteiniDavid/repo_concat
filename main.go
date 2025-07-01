@@ -27,7 +27,6 @@ type Config struct {
 	peek         bool
 	outputDir    string
 	tokenEst     bool
-	noCache      bool
 }
 
 type CacheEntry struct {
@@ -36,6 +35,7 @@ type CacheEntry struct {
 	RepoPath   string    `json:"repo_path"`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
+
 
 func main() {
 	var config Config
@@ -49,7 +49,6 @@ func main() {
 	flag.BoolVar(&config.peek, "peek", false, "Show folder structure and dry run before processing")
 	flag.StringVar(&config.outputDir, "output", ".", "Output directory for concatenated file")
 	flag.BoolVar(&config.tokenEst, "tokens", true, "Estimate token count")
-	flag.BoolVar(&config.noCache, "no-cache", false, "Force fresh clone, ignore cache")
 
 	flag.Parse()
 
@@ -84,13 +83,8 @@ func (s *stringSlice) Set(value string) error {
 	return nil
 }
 
-func getCacheDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	cacheDir := filepath.Join(homeDir, ".cache", "repo-concat")
-	return cacheDir, os.MkdirAll(cacheDir, 0755)
+func getTmpCacheDir() string {
+	return filepath.Join("/tmp", "repo-concat-cache")
 }
 
 func urlToHash(githubURL string) string {
@@ -124,11 +118,7 @@ func formatDuration(d time.Duration) string {
 }
 
 func getCachedRepo(githubURL string) (string, bool, time.Time, error) {
-	cacheDir, err := getCacheDir()
-	if err != nil {
-		return "", false, time.Time{}, err
-	}
-
+	cacheDir := getTmpCacheDir()
 	urlHash := urlToHash(githubURL)
 	metadataPath := filepath.Join(cacheDir, urlHash+".json")
 
@@ -167,8 +157,8 @@ func getCachedRepo(githubURL string) (string, bool, time.Time, error) {
 }
 
 func cacheRepo(githubURL, repoPath string) error {
-	cacheDir, err := getCacheDir()
-	if err != nil {
+	cacheDir := getTmpCacheDir()
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return err
 	}
 
@@ -204,31 +194,24 @@ func processRepository(config Config) error {
 		repoPath = config.localPath
 		shouldCleanup = false
 	} else {
-		// Handle GitHub URL (existing logic)
-		// Check if we have a cached version (unless --no-cache is specified)
-		if !config.noCache {
-			if cachedPath, found, cachedAt, err := getCachedRepo(config.githubURL); err != nil {
-				fmt.Printf("Warning: cache check failed: %v\n", err)
-			} else if found {
-				age := time.Since(cachedAt)
-				fmt.Printf("Using cached repository (cached %s ago): %s\n", formatDuration(age), config.githubURL)
-				repoPath = cachedPath
-				shouldCleanup = false
-			}
+		// Handle GitHub URL - check tmp cache first
+		if cachedPath, found, cachedAt, err := getCachedRepo(config.githubURL); err != nil {
+			fmt.Printf("Warning: cache check failed: %v\n", err)
+		} else if found {
+			age := time.Since(cachedAt)
+			fmt.Printf("Using cached repository (cached %s ago): %s\n", formatDuration(age), config.githubURL)
+			repoPath = cachedPath
+			shouldCleanup = false
 		}
 
-		if config.noCache || repoPath == "" {
-			// No cache found or cache ignored, clone repository
+		if repoPath == "" {
+			// No cache found, clone repository
 			tempDir, err := os.MkdirTemp("", "repo-concat-*")
 			if err != nil {
 				return fmt.Errorf("failed to create temp directory: %w", err)
 			}
 
-			if config.noCache {
-				fmt.Printf("Cloning repository (cache ignored): %s\n", config.githubURL)
-			} else {
-				fmt.Printf("Cloning repository: %s\n", config.githubURL)
-			}
+			fmt.Printf("Cloning repository: %s\n", config.githubURL)
 			if err := cloneRepository(config.githubURL, tempDir); err != nil {
 				os.RemoveAll(tempDir)
 				return fmt.Errorf("failed to clone repository: %w", err)
@@ -238,18 +221,16 @@ func processRepository(config Config) error {
 			repoPath = filepath.Join(tempDir, repoName)
 			shouldCleanup = true
 
-			// Cache the repository in a persistent location (unless --no-cache is specified)
-			if !config.noCache {
-				cacheDir, err := getCacheDir()
-				if err == nil {
-					cachedRepoPath := filepath.Join(cacheDir, urlToHash(config.githubURL))
-					if err := os.RemoveAll(cachedRepoPath); err == nil {
-						if err := os.Rename(repoPath, cachedRepoPath); err == nil {
-							repoPath = cachedRepoPath
-							shouldCleanup = false
-							if err := cacheRepo(config.githubURL, cachedRepoPath); err != nil {
-								fmt.Printf("Warning: failed to cache repository metadata: %v\n", err)
-							}
+			// Cache the repository in tmp
+			cacheDir := getTmpCacheDir()
+			if err := os.MkdirAll(cacheDir, 0755); err == nil {
+				cachedRepoPath := filepath.Join(cacheDir, urlToHash(config.githubURL))
+				if err := os.RemoveAll(cachedRepoPath); err == nil {
+					if err := os.Rename(repoPath, cachedRepoPath); err == nil {
+						repoPath = cachedRepoPath
+						shouldCleanup = false
+						if err := cacheRepo(config.githubURL, cachedRepoPath); err != nil {
+							fmt.Printf("Warning: failed to cache repository metadata: %v\n", err)
 						}
 					}
 				}
@@ -324,7 +305,14 @@ func processRepository(config Config) error {
 	} else {
 		outputFileName = generateOutputFileName(config.githubURL)
 	}
-	outputPath := filepath.Join(config.outputDir, outputFileName)
+	
+	// Create output directory structure
+	outputSubDir := filepath.Join(config.outputDir, "repo-concat-output")
+	if err := os.MkdirAll(outputSubDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+	
+	outputPath := filepath.Join(outputSubDir, outputFileName)
 
 	content, err := concatenateFiles(files, repoPath)
 	if err != nil {
@@ -345,6 +333,11 @@ func processRepository(config Config) error {
 
 	if err := copyToClipboard(content); err != nil {
 		fmt.Printf("Warning: failed to copy to clipboard: %v\n", err)
+		fmt.Println("To enable clipboard copying, install one of these utilities:")
+		fmt.Println("  Ubuntu/Debian: sudo apt install xclip")
+		fmt.Println("  Arch/Manjaro:  sudo pacman -S xclip")
+		fmt.Println("  Fedora/RHEL:   sudo dnf install xclip")
+		fmt.Println("  Or manually copy the content from: " + outputPath)
 	} else {
 		fmt.Println("Content copied to clipboard")
 	}
@@ -353,7 +346,8 @@ func processRepository(config Config) error {
 }
 
 func cloneRepository(githubURL, destDir string) error {
-	cmd := exec.Command("git", "clone", githubURL, destDir)
+	cmd := exec.Command("git", "clone", githubURL)
+	cmd.Dir = destDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
